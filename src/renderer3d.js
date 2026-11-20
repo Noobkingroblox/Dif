@@ -78,16 +78,39 @@ export class Renderer3D {
   _bindEvents() {
     const c = this.canvas;
     c.style.cursor = 'grab';
+    c.style.touchAction = 'none';
+    const activePointers = new Map();
+    let lastPinchDist = null;
 
     c.addEventListener('pointerdown', (e) => {
-      this._dragging = true;
-      this._lastX = e.clientX;
-      this._lastY = e.clientY;
-      c.style.cursor = 'grabbing';
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       c.setPointerCapture(e.pointerId);
+      if (activePointers.size === 1) {
+        this._dragging = true;
+        this._lastX = e.clientX;
+        this._lastY = e.clientY;
+        c.style.cursor = 'grabbing';
+      } else {
+        this._dragging = false;
+        lastPinchDist = null;
+      }
     });
 
     c.addEventListener('pointermove', (e) => {
+      if (!activePointers.has(e.pointerId)) return;
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (activePointers.size === 2) {
+        const pts = Array.from(activePointers.values());
+        const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+        if (lastPinchDist !== null && dist > 5) {
+          const factor = lastPinchDist / dist;
+          this.distance = Math.max(1.8, Math.min(6.5, this.distance * factor));
+        }
+        lastPinchDist = dist;
+        return;
+      }
+
       if (!this._dragging) return;
       const dx = e.clientX - this._lastX;
       const dy = e.clientY - this._lastY;
@@ -97,9 +120,13 @@ export class Renderer3D {
       this.pitch = Math.max(-1.35, Math.min(1.35, this.pitch + dy * 0.008));
     });
 
-    const endDrag = () => {
-      this._dragging = false;
-      c.style.cursor = 'grab';
+    const endDrag = (e) => {
+      activePointers.delete(e.pointerId);
+      lastPinchDist = null;
+      if (activePointers.size === 0) {
+        this._dragging = false;
+        c.style.cursor = 'grab';
+      }
     };
     c.addEventListener('pointerup', endDrag);
     c.addEventListener('pointercancel', endDrag);
