@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Diffusion with Gravity — Calculation Sandbox</title>
+  <meta name="description" content="Interactive 3D finite-volume Scharfetter-Gummel simulation of the drift-diffusion (Smoluchowski) equation with gravity, live Boltzmann equilibrium comparison, and numeric flux telemetry." />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <h1>3D Diffusion with Gravity — Calculation Sandbox</h1>
+        <div class="equation">∂c/∂t = D∇²c − ∇·(v_d c), &nbsp; v_d = (0, −βg, 0), &nbsp; H = D/(βg), &nbsp; Pe = v_g L / D</div>
+      </div>
+      <div class="toolbar">
+        <button id="btnPlay" class="primary">Pause</button>
+        <button id="btnStep">Step +Δt</button>
+        <button id="btnReset">Reset</button>
+        <button id="btnInject" class="accent-amber">+ Inject Packet at Probe</button>
+        <select id="presetSelect" aria-label="Initial condition preset">
+          <option value="top-drop">Top-Center Drop</option>
+          <option value="dual-plumes">Dual Plumes</option>
+          <option value="uniform">Uniform Column</option>
+          <option value="bottom-layer">Bottom Layer (Upward Diffusion)</option>
+          <option value="point-source">Center Point Source</option>
+        </select>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <!-- Left: Physics & Sandbox Controls -->
+      <aside class="panel">
+        <div class="section-title">Physics Parameters</div>
+
+        <div class="control-group">
+          <div class="control-row">
+            <label for="sliderD">Diffusion Coeff (D)</label>
+            <span id="valD" class="val">0.0150 m²/s</span>
+          </div>
+          <input id="sliderD" type="range" min="0.001" max="0.08" step="0.0005" value="0.015" />
+        </div>
+
+        <div class="control-group">
+          <div class="control-row">
+            <label for="sliderG">Gravity (g)</label>
+            <span id="valG" class="val">9.81 m/s²</span>
+          </div>
+          <input id="sliderG" type="range" min="-15" max="25" step="0.05" value="9.81" />
+          <div class="planet-bar">
+            <button type="button" data-gravity="0">0-G</button>
+            <button type="button" data-gravity="1.62">Moon</button>
+            <button type="button" data-gravity="3.72">Mars</button>
+            <button type="button" data-gravity="9.81">Earth</button>
+            <button type="button" data-gravity="24.79">Jup</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-row">
+            <label for="sliderMob">Settling Mobility (β)</label>
+            <span id="valMob" class="val">0.012 s</span>
+          </div>
+          <input id="sliderMob" type="range" min="0.001" max="0.04" step="0.001" value="0.012" />
+        </div>
+
+        <div class="control-group">
+          <div class="control-row">
+            <label for="sliderSpeed">Simulation Speed</label>
+            <span id="valSpeed" class="val">1.00×</span>
+          </div>
+          <input id="sliderSpeed" type="range" min="0.1" max="4.0" step="0.05" value="1.0" />
+        </div>
+
+        <div class="section-title">3D Visualization</div>
+
+        <div class="control-group">
+          <div class="control-row">
+            <label for="viewModeSelect">Render Mode</label>
+            <select id="viewModeSelect">
+              <option value="hybrid" selected>Hybrid (Volume + Slices)</option>
+              <option value="volume">Volumetric Cloud</option>
+              <option value="slices">Orthogonal Slices</option>
+            </select>
+          </div>
+          <div class="control-row">
+            <label for="colormapSelect">Colormap</label>
+            <select id="colormapSelect">
+              <option value="thermal" selected>Thermal</option>
+              <option value="viridis">Viridis</option>
+              <option value="ocean">Ocean</option>
+            </select>
+          </div>
+          <label class="checkbox-row">
+            <input id="toggleFlux" type="checkbox" checked />
+            Show 3D Net Flux Vectors (J)
+          </label>
+          <label class="checkbox-row">
+            <input id="toggleOverlays" type="checkbox" checked />
+            Show 3D COM, Probe & Gravity HUD
+          </label>
+        </div>
+
+        <div class="section-title">3D Voxel Probe</div>
+
+        <div class="control-group">
+          <div class="control-row">
+            <span>Probe Coordinates</span>
+            <span id="valProbePos" class="val">(0.50, 0.50, 0.50) m</span>
+          </div>
+          <div class="control-row"><label for="sliderProbeX">X</label><input id="sliderProbeX" type="range" min="0" max="21" value="11" /></div>
+          <div class="control-row"><label for="sliderProbeY">Y (Height)</label><input id="sliderProbeY" type="range" min="0" max="21" value="11" /></div>
+          <div class="control-row"><label for="sliderProbeZ">Z</label><input id="sliderProbeZ" type="range" min="0" max="21" value="11" /></div>
+        </div>
+
+        <div class="probe-table">
+          <div class="probe-row"><span>Concentration c</span><span id="probeC">0.0000 mol/m³</span></div>
+          <div class="probe-row"><span>Gradient |∇c|</span><span id="probeGrad">0.000 mol/m⁴</span></div>
+          <div class="probe-row"><span>Diffusive Flux J_diff,y</span><span id="probeJDiff">0.0000 mol/(m²·s)</span></div>
+          <div class="probe-row"><span>Gravity Flux J_grav,y</span><span id="probeJGrav">0.0000 mol/(m²·s)</span></div>
+          <div class="probe-row"><span>Net Vertical Flux J_net,y</span><span id="probeJNet">0.0000 mol/(m²·s)</span></div>
+        </div>
+      </aside>
+
+      <!-- Center: 3D Interactive Chamber -->
+      <section class="panel viewport-panel">
+        <div class="viewport-header">
+          <span>3D Chamber [0, 1.0 m]³ — 22×22×22 Conservative FVM (Scharfetter-Gummel)</span>
+          <span>Drag to Orbit · Scroll to Zoom · Double-Click to Reset</span>
+        </div>
+        <canvas id="viewport3d" class="viewport-canvas"></canvas>
+        <div class="kpi-strip">
+          <div class="kpi-cell">
+            <div class="kpi-label">Sim Time</div>
+            <div id="numTime" class="kpi-value">0.00 s</div>
+          </div>
+          <div class="kpi-cell">
+            <div class="kpi-label">Total Mass (Error)</div>
+            <div class="kpi-value"><span id="numMass">0.00000 mol</span></div>
+          </div>
+          <div class="kpi-cell">
+            <div class="kpi-label">Péclet Number (Pe)</div>
+            <div id="numPeclet" class="kpi-value">0.00</div>
+          </div>
+          <div class="kpi-cell">
+            <div class="kpi-label">Boltzmann Eq. Error</div>
+            <div id="numEqErr" class="kpi-value">0.00%</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: Informative Number Visuals & Analytical Charts -->
+      <aside class="panel">
+        <div class="section-title">Accurate Numeric Telemetry</div>
+
+        <div id="numRegime" class="regime-banner">Balanced Drift-Diffusion (Pe ~ 1)</div>
+
+        <div class="metrics-grid">
+          <div class="metric-box">
+            <div class="label">Scale Height H = D/v_g</div>
+            <div id="numScaleH" class="num">0.127 m</div>
+          </div>
+          <div class="metric-box">
+            <div class="label">Drift Speed v_g = βg</div>
+            <div id="numDrift" class="num">0.1177 m/s</div>
+          </div>
+          <div class="metric-box">
+            <div class="label">Center of Mass ȳ</div>
+            <div id="numComY" class="num">0.500 m</div>
+          </div>
+          <div class="metric-box">
+            <div class="label">Peak Concentration c_max</div>
+            <div id="numMaxC" class="num">0.000 mol/m³</div>
+          </div>
+          <div class="metric-box">
+            <div class="label">Mass Conservation ΔM/M₀</div>
+            <div id="numMassErr" class="num">0.0e+0%</div>
+          </div>
+          <div class="metric-box">
+            <div class="label">Spatial Mixing Index</div>
+            <div id="numMixing" class="num">0.0%</div>
+          </div>
+          <div class="metric-box" style="grid-column: span 2;">
+            <div class="label">Adaptive Stable Δt (Substeps/Frame)</div>
+            <div id="numDt" class="num">0.00 ms (1×)</div>
+          </div>
+        </div>
+
+        <div class="section-title">Analytical Comparison</div>
+
+        <div class="chart-wrap">
+          <div class="chart-caption">
+            <span>Vertical Profile c(y) vs Boltzmann c_eq(y)</span>
+            <span>y (m) vs mol/m³</span>
+          </div>
+          <canvas id="profileChart" class="chart-canvas"></canvas>
+        </div>
+
+        <div class="chart-wrap">
+          <div class="chart-caption">
+            <span>Center of Mass ȳ(t) & Equilibrium Error</span>
+            <span>Time (s)</span>
+          </div>
+          <canvas id="seriesChart" class="chart-canvas"></canvas>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
